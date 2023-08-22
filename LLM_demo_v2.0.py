@@ -368,7 +368,7 @@ if __name__ == '__main__':
 
     # Main UI Framework display:flex;flex-wrap:wrap;
     with gr.Blocks(theme=gr.themes.Base.load("theme3.json"), css=css) as demo: ## 可以在huging face下载模板
-        gr.HTML("""<h1 align="center">英特尔大语言模型应用</h1>""")
+        gr.HTML("""<h1 align="center">大语言模型应用</h1>""")
         with gr.Tab("中文应用"):
             with gr.Row():
                 with gr.Column(scale=2.5):

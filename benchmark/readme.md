@@ -9,5 +9,7 @@ cd benchmark
 
 conda activate llm
 
+source bigdl-nano-init -c
+
 ./test_llm_spr.sh > llm_memory1.log 2>&1 
 ```

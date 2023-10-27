@@ -55,10 +55,6 @@ DICT_FUNCTIONS = {
  #   "旅游规划":     "请提供{prompt}的旅游规划\n\n"
 }
 
-DICT_FUNCTIONS3 = {
-    "编程助手":     "{prompt}",
-  #  "代码补全": "Completing code {prompt}\n\n"
-}
 
 ##显示当前 python 程序占用的内存大小
 def show_memory_info(hint):

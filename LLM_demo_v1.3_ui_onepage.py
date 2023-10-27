@@ -44,7 +44,8 @@ from transformers import TextIteratorStreamer
 
 DICT_FUNCTIONS = {
  #   "聊天助手":     "问：{prompt}\n\n答：",
-    "聊天助手":     "{prompt}\n",
+    "聊天助手":     "Question:{prompt}\nAnswer:",
+    "编程助手":     "{prompt}"
  #   "生成大纲":     "帮我生成一份{prompt}的大纲\n\n",
  #   "情感分析":     "对以下内容做情感分析：{prompt}\n\n",
  #   "信息提取":     "对以下内容做精简的信息提取：{prompt}\n\n", 
@@ -54,6 +55,10 @@ DICT_FUNCTIONS = {
  #   "旅游规划":     "请提供{prompt}的旅游规划\n\n"
 }
 
+DICT_FUNCTIONS3 = {
+    "编程助手":     "{prompt}",
+  #  "代码补全": "Completing code {prompt}\n\n"
+}
 
 ##显示当前 python 程序占用的内存大小
 def show_memory_info(hint):
@@ -139,6 +144,40 @@ def parse_text(text):
    # yield text
     return text
 
+def parse_text2(text):
+    lines = text.split("\n")
+    lines = [line for line in lines if line != ""]
+    count = 0
+    for i, line in enumerate(lines):
+        if "```" in line:
+            count += 1
+            items = line.split('`')
+            if count % 2 == 1:
+                lines[i] = f'<pre><code class="language-{items[-1]}">'
+            else:
+                lines[i] = f'<br></code></pre>'
+        else:
+            if i > 0:
+                
+                #line = line.replace("`", "\`")
+                # #    line = line.replace(".", "&#46;")
+                # #     line = line.replace("!", "&#33;")
+                #     line = line.replace("(", "&#40;")
+                #     line = line.replace(")", "&#41;")
+                #     line = line.replace("$", "&#36;")
+
+                line = line.replace("<", "&lt;")
+                line = line.replace(">", "&gt;")               
+                line = line.replace("*", "&ast;")
+                line = line.replace("_", "&lowbar;")
+                line = line.replace("-", "&#45;")
+                line = line.replace(" ", "&nbsp;&nbsp;")
+                lines[i] = "<br>"+line           
+        #print(lines)
+    text = "".join(lines)
+    return text
+
+
 # LLama2 Starcoder-15.5b load 
 def load(model_path, model_family, n_threads,n_ctx):
     llm = BigdlNativeForCausalLM.from_pretrained(
@@ -171,7 +210,11 @@ def predict(input, function, chatbot, max_length, top_p, temperature, history, m
                 model = load(model_path=model_all_local_path + "\\bigdl_llm_llama2_13b_q4_0.bin",
                         model_family='llama',
                         n_threads=20,n_ctx=4096)
-
+            elif model_name == "StarCoder-15.5b":
+                print("******* loading StarCoder-15.5b")
+                model = load(model_path=model_all_local_path + "\\bigdl_llm_starcoder_q4_0.bin",
+                        model_family='starcoder',
+                        n_threads=20,n_ctx=4096)
             elif model_name == "Qwen-7b-chat":
                 print("******* loading Qwen-7B")         
                 model = AutoModelForCausalLM.load_low_bit(model_all_local_path + "\\Qwen-7B-Chat-int4", trust_remote_code=True, optimize_model=False)
@@ -190,6 +233,11 @@ def predict(input, function, chatbot, max_length, top_p, temperature, history, m
                 model = AutoModelForCausalLM.load_low_bit(model_all_local_path + "\\internlm-chat-7b-8k-int4", trust_remote_code=True, optimize_model=False)
               #  model = BenchmarkWrapper(model)
                 tokenizer = AutoTokenizer.from_pretrained(model_all_local_path + "\\internlm-chat-7b-8k-int4", trust_remote_code=True)
+            elif model_name == "CodeShell-7B":
+                print("******* loading CodeShell-7B")         
+                model = AutoModelForCausalLM.load_low_bit(model_all_local_path + "\\CodeShell-7B-int4", trust_remote_code=True, optimize_model=False)
+              #  model = BenchmarkWrapper(model)
+                tokenizer = AutoTokenizer.from_pretrained(model_all_local_path + "\\CodeShell-7B-int4", trust_remote_code=True)
         except:
             print("******************** Can't find local model ************************")
             sys.exit(1)  
@@ -213,10 +261,27 @@ def predict(input, function, chatbot, max_length, top_p, temperature, history, m
                 timeFirst = time.time() - timeStart
                 timeFirstRecord = True
             yield chatbot, "", "", ""  
+    elif model_name == "StarCoder-15.5b":
+        template3 = DICT_FUNCTIONS[function]
+        prompt = template3.format(prompt=input)
+        timeStart = time.time()
+        for chunk in model(prompt, stop=['<fim_prefix>', '<fim_middle>'],stream=True,max_tokens=max_length):   
+            response += chunk['choices'][0]['text']
+            chatbot[-1] = (input, parse_text2(response))
+            
+            if timeFirstRecord == False:
+                timeFirst = time.time() - timeStart
+                timeFirstRecord = True
+            yield chatbot, "", "", ""
 
-    elif model_name == "Qwen-7b-chat" or model_name == "Baichuan2-7b-chat" or model_name == "internlm-chat-7b-8k":
-        template4 = DICT_FUNCTIONS[function]
-        prompt = template4.format(prompt=input)
+    elif model_name == "Qwen-7b-chat" or model_name == "Baichuan2-7b-chat" or model_name == "internlm-chat-7b-8k" or model_name == "CodeShell-7B":
+        if model_name == "CodeShell-7B":
+            template3 = DICT_FUNCTIONS[function]
+            prompt = template3.format(prompt=input)
+        else:
+            template4 = DICT_FUNCTIONS[function]
+            prompt = template4.format(prompt=input)
+
         
         with torch.inference_mode():
             input_ids = tokenizer([prompt], return_tensors='pt')
@@ -240,7 +305,10 @@ def predict(input, function, chatbot, max_length, top_p, temperature, history, m
             response = ""
             for stream_output in streamer:
                 response += stream_output
-                chatbot[-1] = (input, parse_text(response))
+                if model_name == "CodeShell-7B":
+                    chatbot[-1] = (input, parse_text2(response))
+                else:
+                    chatbot[-1] = (input, parse_text(response))
                	if timeFirstRecord == False:
                	
                	    timeFirst = time.time() - timeStart
@@ -260,7 +328,7 @@ def predict(input, function, chatbot, max_length, top_p, temperature, history, m
 
     timeCost = time.time() - timeStart
 
-    if model_name == "Qwen-7b-chat" or model_name == "Baichuan2-7b-chat" or model_name == "internlm-chat-7b-8k":
+    if model_name == "Qwen-7b-chat" or model_name == "Baichuan2-7b-chat" or model_name == "internlm-chat-7b-8k" or model_name == "CodeShell-7B":
         token_count_input = len(tokenizer.tokenize(prompt))
         token_count_output = len(tokenizer.tokenize(response))
     else:
@@ -299,7 +367,7 @@ if __name__ == '__main__':
     xpu = args.xpu
     model_name = "None"
     #model_name = "chatglm2-6b"
-    model_all_local_path = "./checkpoint"
+    model_all_local_path = os.path.dirname(__file__) + "./checkpoint"
     model = None
     tokenizer = None
     
@@ -310,13 +378,13 @@ if __name__ == '__main__':
     listFunction = list(DICT_FUNCTIONS.keys())
 
     # Main UI Framework display:flex;flex-wrap:wrap;
-    with gr.Blocks(theme=gr.themes.Base.load("theme3.json"), css=css) as demo: ## 可以在huging face下载模板
+    with gr.Blocks(theme=gr.themes.Base.load(os.path.dirname(__file__) + "./theme3.json"), css=css) as demo: ## 可以在huging face下载模板
         gr.HTML("""<h1 align="center">英特尔大语言模型应用</h1>""")
         with gr.Row():
             with gr.Column(scale=2.5):
                 user_function = gr.Radio(listFunction, elem_classes="radio-group", label="功能", value=listFunction[0], min_width=120, scale=1, interactive=True)
                 with gr.Column(scale=1, visible=True): # 配置是否显示控制面板                       
-                    model_select = gr.Dropdown(["chatglm2-6b","llama2-13b","Qwen-7b-chat","Baichuan2-7b-chat","internlm-chat-7b-8k"],value="chatglm2-6b",label="选择模型", interactive=True)
+                    model_select = gr.Dropdown(["chatglm2-6b","llama2-13b","Qwen-7b-chat","Baichuan2-7b-chat","internlm-chat-7b-8k","CodeShell-7B","StarCoder-15.5b"],value="chatglm2-6b",label="选择模型", interactive=True)
                     device_inf = gr.Dropdown(["CPU"],value="CPU",label="推理设备", interactive=True)
                     max_length = gr.Slider(0, 2048, value=512, step=1.0, label="输出最大长度", interactive=True)                       
                     temperature = gr.Slider(0, 1, value=0.95, step=0.01, label="Temperature", interactive=True)
@@ -333,7 +401,10 @@ if __name__ == '__main__':
                             submitBtn = gr.Button("提交", variant="primary",interactive=True)
                             emptyBtn = gr.Button("清除",interactive=True)
                         gr.Examples( [ "你好","我最近经常失眠，晚上睡不着怎么办？","我计划国庆节出去玩一周，给我推荐一下江浙沪周边3个目的地","帮我生成一份大语言模型对未来的影响的论文的大纲","将以下内容翻译成英文：条条大路通罗马","请提供红烧狮子头的食谱和烹饪方法","推荐上海三个旅游景点","以第一人称视角介绍太阳的起源和变化","如何提升个人魅力",
-                            "What is AI?","Add 1 and 3, which gives us","Once upon a time, there existed a little girl who liked to have adventures. She wanted to go to places and meet new people and have fun."],user_input,chatbot)
+                            "What is AI?","Add 1 and 3, which gives us","Once upon a time, there existed a little girl who liked to have adventures. She wanted to go to places and meet new people and have fun.",
+                            "Given two binary strings a and b, return their sum as a binary string.",
+                            		    "Write a program to filter all the odd numbers from a python list",
+				            "Write a Python function to generate the nth Fibonacci number."],user_input,chatbot)
         
      
         history = gr.State([])
